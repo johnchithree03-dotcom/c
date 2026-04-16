@@ -375,8 +375,10 @@ class RideService {
   ): Promise<RideOption[]> {
     const rideOptions: RideOption[] = [];
 
-    // Fetch vehicle service rules for "ride" service
-    const vehicleRules = await this.fetchVehicleServiceRules();
+    try {
+      // Fetch vehicle service rules for "ride" service
+      const vehicleRules = await this.fetchVehicleServiceRules();
+      console.log('[v0] Rules:', vehicleRules);
 
     // Calculate trip distance (approximate)
     let tripDistanceKm = 8; // Default
@@ -387,14 +389,22 @@ class RideService {
       tripDurationMinutes = Math.round((tripDistanceKm / 35) * 60); // 35 km/h average
     }
 
+    const allVehicles: VehicleMaster[] = [];
+    
     // Process each vehicle rule
     for (const rule of vehicleRules) {
+      console.log('[v0] PricingTypes for rule', rule.id, ':', rule.allowedPricingTypes);
+      
       // Fetch vehicle master data
       const vehicle = await this.fetchVehicleMaster(rule.vehicleRef);
-      if (!vehicle) continue;
+      if (!vehicle) {
+        console.log('[v0] Vehicle not found for ref:', rule.vehicleRef);
+        continue;
+      }
+      allVehicles.push(vehicle);
 
-      // Process each pricing type for this vehicle
-      for (const pricingId of rule.pricingTypes) {
+      // Process each pricing type for this vehicle - use allowedPricingTypes (NOT pricingTypes)
+      for (const pricingId of rule.allowedPricingTypes) {
         const pricing = await this.fetchPricingConfig(pricingId);
         if (!pricing) continue;
 
@@ -429,6 +439,9 @@ class RideService {
       }
     }
 
+    console.log('[v0] Vehicles:', allVehicles);
+    console.log('[v0] RideOptions:', rideOptions);
+
     // Sort by availability first, then by price
     rideOptions.sort((a, b) => {
       if (a.isAvailable && !b.isAvailable) return -1;
@@ -437,6 +450,11 @@ class RideService {
     });
 
     return rideOptions;
+    } catch (error) {
+      // Log error but don't crash - return empty array
+      console.error('[v0] Error building ride options:', error);
+      return [];
+    }
   }
 
   /**

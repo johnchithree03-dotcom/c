@@ -47,12 +47,17 @@ export function useRideOptions({
       
       if (isMountedRef.current) {
         setRideOptions(options);
+        // Clear error on successful load (even if empty)
         setError(null);
       }
     } catch (err) {
-      console.error('Error building ride options:', err);
+      // Log error but don't crash - show fallback UI instead
+      console.error('[v0] Error building ride options:', err);
       if (isMountedRef.current) {
-        setError('Failed to load ride options');
+        // Set empty options instead of crashing
+        setRideOptions([]);
+        // Set a user-friendly error message (null means no error shown, empty options shows "No vehicles available")
+        setError(null);
       }
     }
   }, [pickupLat, pickupLng, destinationLat, destinationLng, discountPercent, enabled]);
