@@ -23,6 +23,16 @@ export const PRICING_DISPLAY_NAMES: Record<string, string> = {
   'aletwende': 'Aletwende'
 };
 
+// Vehicle category mapping for pricing types (CRITICAL)
+// pricing → vehicle_service_rules → vehicleRef → vehicles_master → vehicleCategory
+export const PRICING_TO_VEHICLE_CATEGORY: Record<string, string> = {
+  'ride_economy': 'car',
+  'ride_comfort': 'car',
+  'ride_women': 'car',
+  'ride_xl': 'minibus',
+  'aletwende': 'car'
+};
+
 // Types
 export interface PricingConfig {
   id: string;
@@ -334,37 +344,66 @@ class RideService {
   }
 
   /**
-   * Find nearest driver for a vehicle category
+   * Find all matching drivers for a vehicle category
+   * Returns array sorted by distance (closest first)
    */
-  findNearestDriver(
-    vehicleCategory: string,
+  findMatchingDrivers(
+    requiredVehicleCategory: string,
     pickupLat: number,
     pickupLng: number
-  ): { driverId: string; distance: number; etaMinutes: number } | null {
-    let nearestDriver: { driverId: string; distance: number; etaMinutes: number } | null = null;
-    let minDistance = Infinity;
+  ): { driverId: string; distance: number; etaMinutes: number }[] {
+    const matchingDrivers: { driverId: string; distance: number; etaMinutes: number }[] = [];
+
+    console.log('[v0] Finding drivers for vehicleCategory:', requiredVehicleCategory);
+    console.log('[v0] Drivers Online:', Array.from(this.onlineDriversCache.entries()));
+    console.log('[v0] Driver Locations:', Array.from(this.driverLocationsCache.entries()));
 
     this.onlineDriversCache.forEach((driver, driverId) => {
-      // Match vehicle category
-      if (driver.vehicleCategory === vehicleCategory || !vehicleCategory) {
+      // CRITICAL: Match driver.vehicleCategory === requiredVehicleCategory
+      // ONLY use drivers_online/{uid} and driver_locations/{uid}
+      if (driver.vehicleCategory === requiredVehicleCategory) {
         const location = this.driverLocationsCache.get(driverId);
         if (location) {
+          // Calculate distance using Haversine formula
           const distance = calculateDistance(pickupLat, pickupLng, location.lat, location.lng);
-          if (distance < minDistance) {
-            minDistance = distance;
-            // Assume average speed of 35 km/h in city
-            const etaMinutes = Math.max(1, Math.round((distance / 35) * 60));
-            nearestDriver = { driverId, distance, etaMinutes };
-          }
+          // ETA = (distance / 40 km/h) * 60 minutes
+          const etaMinutes = Math.max(1, Math.round((distance / 40) * 60));
+          
+          matchingDrivers.push({ driverId, distance, etaMinutes });
         }
       }
     });
 
-    return nearestDriver;
+    // Sort by distance (closest first)
+    matchingDrivers.sort((a, b) => a.distance - b.distance);
+
+    console.log('[v0] Matching Drivers for', requiredVehicleCategory, ':', matchingDrivers);
+    return matchingDrivers;
+  }
+
+  /**
+   * Find nearest driver for a vehicle category (returns single closest driver)
+   */
+  findNearestDriver(
+    requiredVehicleCategory: string,
+    pickupLat: number,
+    pickupLng: number
+  ): { driverId: string; distance: number; etaMinutes: number } | null {
+    const matchingDrivers = this.findMatchingDrivers(requiredVehicleCategory, pickupLat, pickupLng);
+    
+    if (matchingDrivers.length === 0) {
+      return null;
+    }
+
+    // Pick the CLOSEST driver only
+    const closestDriver = matchingDrivers[0];
+    console.log('[v0] Selected Driver:', closestDriver);
+    return closestDriver;
   }
 
   /**
    * Build ride options from Firestore data + Realtime driver data
+   * CRITICAL: Returns ONLY ONE card per pricingId (no duplicates)
    */
   async buildRideOptions(
     pickupLat: number | null,
@@ -373,83 +412,132 @@ class RideService {
     destinationLng: number | null,
     discountPercent: number = 0
   ): Promise<RideOption[]> {
-    const rideOptions: RideOption[] = [];
-
     try {
       // Fetch vehicle service rules for "ride" service
       const vehicleRules = await this.fetchVehicleServiceRules();
       console.log('[v0] Rules:', vehicleRules);
 
-    // Calculate trip distance (approximate)
-    let tripDistanceKm = 8; // Default
-    let tripDurationMinutes = 15; // Default
-    
-    if (pickupLat && pickupLng && destinationLat && destinationLng) {
-      tripDistanceKm = calculateDistance(pickupLat, pickupLng, destinationLat, destinationLng);
-      tripDurationMinutes = Math.round((tripDistanceKm / 35) * 60); // 35 km/h average
-    }
-
-    const allVehicles: VehicleMaster[] = [];
-    
-    // Process each vehicle rule
-    for (const rule of vehicleRules) {
-      console.log('[v0] PricingTypes for rule', rule.id, ':', rule.allowedPricingTypes);
+      // Calculate trip distance (approximate)
+      let tripDistanceKm = 8; // Default
+      let tripDurationMinutes = 15; // Default
       
-      // Fetch vehicle master data
-      const vehicle = await this.fetchVehicleMaster(rule.vehicleRef);
-      if (!vehicle) {
-        console.log('[v0] Vehicle not found for ref:', rule.vehicleRef);
-        continue;
+      if (pickupLat && pickupLng && destinationLat && destinationLng) {
+        tripDistanceKm = calculateDistance(pickupLat, pickupLng, destinationLat, destinationLng);
+        tripDurationMinutes = Math.round((tripDistanceKm / 40) * 60); // 40 km/h average
       }
-      allVehicles.push(vehicle);
 
-      // Process each pricing type for this vehicle - use allowedPricingTypes (NOT pricingTypes)
-      for (const pricingId of rule.allowedPricingTypes) {
-        const pricing = await this.fetchPricingConfig(pricingId);
-        if (!pricing) continue;
+      // CRITICAL: Group by pricingId to avoid duplicate cards
+      // Map: pricingId -> { candidates: RideOption[], bestOption: RideOption | null }
+      const pricingOptionsMap = new Map<string, {
+        candidates: Array<{
+          option: RideOption;
+          vehicle: VehicleMaster;
+          nearestDriver: { driverId: string; distance: number; etaMinutes: number } | null;
+        }>;
+      }>();
 
-        // Calculate estimated price
-        const fullPrice = this.calculatePrice(pricing, tripDistanceKm, tripDurationMinutes);
-        const discountedPrice = discountPercent > 0 
-          ? Math.round(fullPrice * (1 - discountPercent / 100))
-          : fullPrice;
+      const allVehicles: VehicleMaster[] = [];
+      
+      // Process each vehicle rule
+      for (const rule of vehicleRules) {
+        console.log('[v0] PricingTypes for rule', rule.id, ':', rule.allowedPricingTypes);
+        
+        // Fetch vehicle master data
+        const vehicle = await this.fetchVehicleMaster(rule.vehicleRef);
+        if (!vehicle) {
+          console.log('[v0] Vehicle not found for ref:', rule.vehicleRef);
+          continue;
+        }
+        allVehicles.push(vehicle);
 
-        // Find nearest available driver
-        const nearestDriver = pickupLat && pickupLng 
-          ? this.findNearestDriver(vehicle.vehicleCategory, pickupLat, pickupLng)
-          : null;
+        // Process each pricing type for this vehicle - use allowedPricingTypes (NOT pricingTypes)
+        for (const pricingId of rule.allowedPricingTypes) {
+          const pricing = await this.fetchPricingConfig(pricingId);
+          if (!pricing) continue;
 
-        const isAvailable = nearestDriver !== null;
-        const etaMinutes = nearestDriver?.etaMinutes || 0;
+          // Get the required vehicle category from the mapping
+          const requiredVehicleCategory = PRICING_TO_VEHICLE_CATEGORY[pricingId] || vehicle.vehicleCategory;
 
-        rideOptions.push({
-          id: `${pricingId}_${rule.id}`,
-          pricingId,
-          name: pricing.name || pricingId,
-          displayName: PRICING_DISPLAY_NAMES[pricingId] || pricing.name || pricingId,
-          estimatedPrice: discountedPrice,
-          originalPrice: fullPrice,
-          eta: isAvailable ? `${etaMinutes} min` : 'No drivers',
-          etaMinutes,
-          vehicleCategory: vehicle.vehicleCategory,
-          seats: vehicle.maxSeats,
-          isAvailable,
-          nearestDriverId: nearestDriver?.driverId
+          // Calculate estimated price
+          const fullPrice = this.calculatePrice(pricing, tripDistanceKm, tripDurationMinutes);
+          const discountedPrice = discountPercent > 0 
+            ? Math.round(fullPrice * (1 - discountPercent / 100))
+            : fullPrice;
+
+          // Find nearest available driver using CORRECT vehicle category matching
+          const nearestDriver = pickupLat && pickupLng 
+            ? this.findNearestDriver(requiredVehicleCategory, pickupLat, pickupLng)
+            : null;
+
+          const isAvailable = nearestDriver !== null;
+          const etaMinutes = nearestDriver?.etaMinutes || 0;
+
+          const option: RideOption = {
+            id: pricingId, // Use pricingId as the ID to ensure uniqueness
+            pricingId,
+            name: pricing.name || pricingId,
+            displayName: PRICING_DISPLAY_NAMES[pricingId] || pricing.name || pricingId,
+            estimatedPrice: discountedPrice,
+            originalPrice: fullPrice,
+            eta: isAvailable ? `${etaMinutes} min` : 'No drivers',
+            etaMinutes,
+            vehicleCategory: requiredVehicleCategory,
+            seats: vehicle.maxSeats, // Dynamic seats from the vehicle
+            isAvailable,
+            nearestDriverId: nearestDriver?.driverId
+          };
+
+          // Add to the map for this pricingId
+          if (!pricingOptionsMap.has(pricingId)) {
+            pricingOptionsMap.set(pricingId, { candidates: [] });
+          }
+          pricingOptionsMap.get(pricingId)!.candidates.push({
+            option,
+            vehicle,
+            nearestDriver
+          });
+        }
+      }
+
+      console.log('[v0] Vehicles:', allVehicles);
+
+      // CRITICAL: Select only ONE BEST option per pricingId
+      // Priority: available drivers > lowest ETA > first found
+      const finalRideOptions: RideOption[] = [];
+
+      pricingOptionsMap.forEach((data, pricingId) => {
+        const { candidates } = data;
+        if (candidates.length === 0) return;
+
+        // Sort candidates: available first, then by lowest ETA
+        candidates.sort((a, b) => {
+          // Available drivers first
+          if (a.nearestDriver && !b.nearestDriver) return -1;
+          if (!a.nearestDriver && b.nearestDriver) return 1;
+          // Then by ETA (lowest first)
+          if (a.nearestDriver && b.nearestDriver) {
+            return a.nearestDriver.etaMinutes - b.nearestDriver.etaMinutes;
+          }
+          return 0;
         });
-      }
-    }
 
-    console.log('[v0] Vehicles:', allVehicles);
-    console.log('[v0] RideOptions:', rideOptions);
+        // Pick the BEST option (first after sorting)
+        const best = candidates[0];
+        finalRideOptions.push(best.option);
+        
+        console.log('[v0] Selected best option for', pricingId, ':', best.option);
+      });
 
-    // Sort by availability first, then by price
-    rideOptions.sort((a, b) => {
-      if (a.isAvailable && !b.isAvailable) return -1;
-      if (!a.isAvailable && b.isAvailable) return 1;
-      return a.estimatedPrice - b.estimatedPrice;
-    });
+      console.log('[v0] Final RideOptions (deduplicated):', finalRideOptions);
 
-    return rideOptions;
+      // Sort by availability first, then by price
+      finalRideOptions.sort((a, b) => {
+        if (a.isAvailable && !b.isAvailable) return -1;
+        if (!a.isAvailable && b.isAvailable) return 1;
+        return a.estimatedPrice - b.estimatedPrice;
+      });
+
+      return finalRideOptions;
     } catch (error) {
       // Log error but don't crash - return empty array
       console.error('[v0] Error building ride options:', error);

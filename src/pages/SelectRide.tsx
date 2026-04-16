@@ -9,13 +9,13 @@ import { useRideOptions } from '../hooks/useRideOptions';
 import { RideOption } from '../services/rideService';
 import { getFleetOptions, FleetVehicle } from '../services/fleetService';
 
-// Car icons mapping - use public folder images with emoji fallbacks
-const RIDE_ICONS: Record<string, { image?: string; emoji: string; color: string }> = {
-  'ride_economy': { image: '/cars/economy.png', emoji: '🚙', color: 'bg-green-100' },
-  'ride_comfort': { image: '/cars/comfort.png', emoji: '🚗', color: 'bg-gray-100' },
-  'ride_xl': { image: '/cars/xl.png', emoji: '🚐', color: 'bg-blue-100' },
-  'ride_women': { image: '/cars/economy.png', emoji: '🚗', color: 'bg-pink-100' },
-  'aletwende': { image: '/cars/economy.png', emoji: '🚕', color: 'bg-yellow-100' },
+// Car icons mapping - use ONLY local images, NO emojis
+const RIDE_ICONS: Record<string, { image: string; color: string }> = {
+  'ride_economy': { image: '/cars/economy.png', color: 'bg-green-100' },
+  'ride_comfort': { image: '/cars/comfort.png', color: 'bg-gray-100' },
+  'ride_xl': { image: '/cars/xl.png', color: 'bg-blue-100' },
+  'ride_women': { image: '/cars/economy.png', color: 'bg-pink-100' },
+  'aletwende': { image: '/cars/economy.png', color: 'bg-yellow-100' },
 };
 
 interface SelectRideProps {
@@ -529,7 +529,11 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                 >
                   <div className="flex items-center space-x-4">
                     <div className={`w-12 h-12 flex items-center justify-center rounded-xl ${getRideIconConfig(option.pricingId).color}`}>
-                      <span className="text-2xl">{getRideIconConfig(option.pricingId).emoji}</span>
+                      <img 
+                        src={getRideIconConfig(option.pricingId).image} 
+                        alt={option.displayName}
+                        className="w-10 h-10 object-contain"
+                      />
                     </div>
                     <div className="flex-1 text-left">
                       <div className="flex items-center justify-between">
