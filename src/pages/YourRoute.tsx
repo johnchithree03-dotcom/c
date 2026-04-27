@@ -6,6 +6,7 @@ import { MapBackground } from '../components/MapBackground';
 import { ScrollableSection } from '../components/ScrollableSection';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { getAddressSuggestions } from '../data/addressSuggestions';
+import { apiPost } from '../config/api';
 
 interface YourRouteProps {
   onRouteComplete?: (pickup: string, destination: string, stops: string[]) => void;
@@ -141,26 +142,43 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       return null;
     };
 
-    // Auto-navigate to next empty field or complete the route
-    setTimeout(() => {
-      const nextField = findNextEmptyField();
+    // IMMEDIATELY check completion - NO setTimeout delay
+    const nextField = findNextEmptyField();
 
-      if (nextField !== null) {
-        // Move to next empty field
-        setActiveField(nextField);
-        if (nextField === 'pickup') {
-          setSearchQuery(newPickup);
-        } else if (nextField === 'destination') {
-          setSearchQuery(newDestination);
-        } else {
-          setSearchQuery(newStops[nextField] || '');
-        }
-      } else if (checkFieldsFilled() && serviceType === 'ride') {
-        // Only auto-navigate for ride service type
-        onRouteComplete?.(newPickup, newDestination, newStops);
-        navigate('/select-ride');
+    if (nextField !== null) {
+      // Move to next empty field
+      setActiveField(nextField);
+      if (nextField === 'pickup') {
+        setSearchQuery(newPickup);
+      } else if (nextField === 'destination') {
+        setSearchQuery(newDestination);
+      } else {
+        setSearchQuery(newStops[nextField] || '');
       }
-    }, 100);
+    } else if (checkFieldsFilled() && serviceType === 'ride') {
+      // All fields complete for ride - IMMEDIATELY navigate
+      // Fire API call during transition (don't await - let it run in background)
+      apiPost('/getRideOptions', {
+        serviceType: 'ride',
+        pickup: newPickup,
+        destination: newDestination,
+        stops: newStops,
+        pickupLat: 0,
+        pickupLng: 0,
+        dropLat: 0,
+        dropLng: 0
+      }).catch(err => console.error('API error:', err));
+
+      onRouteComplete?.(newPickup, newDestination, newStops);
+      navigate('/select-ride', {
+        state: {
+          serviceType: 'ride',
+          pickup: newPickup,
+          destination: newDestination,
+          stops: newStops
+        }
+      });
+    }
   };
 
   const handleAddStop = () => {
@@ -222,6 +240,41 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
 
   const handleLogisticsNavigate = () => {
     if (!pickup || !destination || !extraOption) return;
+
+    // Build API payload based on service type
+    let payload: any = {
+      pickup,
+      destination,
+      stops,
+      pickupLat: 0,
+      pickupLng: 0,
+      dropLat: 0,
+      dropLng: 0
+    };
+
+    if (serviceType === 'package') {
+      payload = {
+        ...payload,
+        serviceType: 'courier',
+        category: 'package',
+        kg: extraOption // e.g. "0-5kg"
+      };
+    } else if (serviceType === 'towing') {
+      payload = {
+        ...payload,
+        serviceType: 'towing',
+        vehicleType: extraOption // e.g. "SUV"
+      };
+    } else if (serviceType === 'truck') {
+      payload = {
+        ...payload,
+        serviceType: 'delivery_truck',
+        deliveryType: extraOption // e.g. "farm produce"
+      };
+    }
+
+    // Fire API call during transition (don't await - let it run in background)
+    apiPost('/getRideOptions', payload).catch(err => console.error('API error:', err));
 
     onRouteComplete?.(pickup, destination, stops);
     navigate('/select-ride', {

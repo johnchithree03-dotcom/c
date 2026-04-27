@@ -8,10 +8,11 @@ import { useRideContext } from '../contexts/RideContext';
 import { useRideOptions } from '../hooks/useRideOptions';
 import { RideOption } from '../services/rideService';
 import { getFleetOptions, FleetVehicle } from '../services/fleetService';
+import { apiPost } from '../config/api';
 
 // Car icons mapping - use ONLY local images, NO emojis
 const RIDE_ICONS: Record<string, { image: string; color: string }> = {
-  'ride_economy': { image: '/cars/economy.png', color: 'bg-green-100' },
+  'ride_economy': { image: '/cars/economy.png', color: 'bg-[#5B2EFF]/10' },
   'ride_comfort': { image: '/cars/comfort.png', color: 'bg-gray-100' },
   'ride_xl': { image: '/cars/xl.png', color: 'bg-blue-100' },
   'ride_women': { image: '/cars/economy.png', color: 'bg-pink-100' },
@@ -51,8 +52,41 @@ export const SelectRide: React.FC<SelectRideProps> = ({
     serviceType = 'ride', 
     extraOption,
     pickupCoords,
-    destinationCoords 
+    destinationCoords,
+    pickup: navPickup,
+    destination: navDestination,
+    stops: navStops = []
   } = location.state || {};
+
+  // Call backend API on page load to preload options
+  useEffect(() => {
+    let payload: any = {
+      pickup: navPickup || pickup,
+      destination: navDestination || destination,
+      stops: navStops || stops,
+      pickupLat: pickupCoords?.lat || 0,
+      pickupLng: pickupCoords?.lng || 0,
+      dropLat: destinationCoords?.lat || 0,
+      dropLng: destinationCoords?.lng || 0
+    };
+
+    if (serviceType === 'ride') {
+      payload.serviceType = 'ride';
+    } else if (serviceType === 'package') {
+      payload.serviceType = 'courier';
+      payload.category = 'package';
+      payload.kg = extraOption || '0-5kg';
+    } else if (serviceType === 'towing') {
+      payload.serviceType = 'towing';
+      payload.vehicleType = extraOption || 'SUV';
+    } else if (serviceType === 'truck') {
+      payload.serviceType = 'delivery_truck';
+      payload.deliveryType = extraOption || 'farm produce';
+    }
+
+    // Fire API call on mount
+    apiPost('/getRideOptions', payload).catch(err => console.error('API error on load:', err));
+  }, []);
 
   // User's GPS location state
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -296,7 +330,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
 
   return (
     <div className="fixed inset-0 bg-gray-100 overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-blue-100 via-blue-50 to-green-100">
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-100 via-blue-50 to-[#5B2EFF]/10">
         <div className="absolute inset-0 opacity-40">
           <svg className="w-full h-full">
             <defs>
@@ -316,7 +350,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
         </div>
 
         <div className="absolute top-1/3 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-          <div className="w-8 h-8 bg-green-500 rounded-full border-4 border-white shadow-lg" />
+          <div className="w-8 h-8 bg-[#5B2EFF] rounded-full border-4 border-white shadow-lg" />
         </div>
         <div className="absolute top-2/3 right-1/3">
           <div className="w-6 h-6 bg-blue-500 rounded-full border-4 border-white shadow-lg" />
@@ -438,7 +472,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                   onClick={() => setSelectedFilter('recommended')}
                   className={`px-4 py-2 rounded-full font-medium text-sm transition-all whitespace-nowrap ${
                     selectedFilter === 'recommended'
-                      ? 'bg-white border-2 border-green-600 text-gray-900'
+                      ? 'bg-white border-2 border-[#5B2EFF] text-gray-900'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   initial={{ scale: 0.8, opacity: 0 }}
@@ -453,7 +487,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                   onClick={() => setSelectedFilter('faster')}
                   className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-1 whitespace-nowrap ${
                     selectedFilter === 'faster'
-                      ? 'bg-white border-2 border-green-600 text-gray-900'
+                      ? 'bg-white border-2 border-[#5B2EFF] text-gray-900'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   initial={{ scale: 0.8, opacity: 0 }}
@@ -468,7 +502,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                   onClick={() => setSelectedFilter('cheaper')}
                   className={`px-4 py-2 rounded-full font-medium text-sm transition-all flex items-center gap-1 whitespace-nowrap ${
                     selectedFilter === 'cheaper'
-                      ? 'bg-white border-2 border-green-600 text-gray-900'
+                      ? 'bg-white border-2 border-[#5B2EFF] text-gray-900'
                       : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                   }`}
                   initial={{ scale: 0.8, opacity: 0 }}
@@ -495,7 +529,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
-                <div className="w-8 h-8 border-2 border-green-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                <div className="w-8 h-8 border-2 border-[#5B2EFF] border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                 <p className="text-gray-600 text-sm">Loading ride options...</p>
               </div>
             </div>
@@ -519,7 +553,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                     !option.isAvailable 
                       ? 'border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed'
                       : selectedRide?.id === option.id
-                        ? 'border-green-600 bg-green-50'
+                        ? 'border-[#5B2EFF] bg-[#5B2EFF]/10'
                         : 'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                   initial={{ opacity: 0, y: 20 }}
@@ -573,7 +607,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                   onClick={() => setSelectedFleetVehicle(vehicle)}
                   className={`w-full p-4 rounded-2xl border-2 transition-all ${
                     selectedFleetVehicle?.id === vehicle.id
-                      ? 'border-green-600 bg-green-50'
+                      ? 'border-[#5B2EFF] bg-[#5B2EFF]/10'
                       : 'border-gray-200 bg-white hover:border-gray-300'
                   }`}
                   initial={{ opacity: 0, y: 20 }}
@@ -649,7 +683,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
 
             <motion.button
               onClick={() => navigate('/schedule-ride')}
-              className="w-12 h-12 bg-green-600 text-white rounded-2xl flex items-center justify-center hover:bg-green-700 transition-colors shadow-lg flex-shrink-0"
+              className="w-12 h-12 bg-[#5B2EFF] text-white rounded-2xl flex items-center justify-center hover:bg-[#4A25D9] transition-colors shadow-lg flex-shrink-0"
               whileTap={{ scale: 0.95 }}
             >
               <Calendar size={20} />
@@ -662,7 +696,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
             className={`w-full py-3 rounded-2xl font-bold text-base transition-colors shadow-lg ${
               isRideActive || (serviceType === 'ride' ? !selectedRide?.isAvailable : !selectedFleetVehicle)
                 ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                : 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-[#5B2EFF] text-white hover:bg-[#4A25D9]'
             }`}
             whileTap={{ scale: (isRideActive || !selectedRide?.isAvailable) ? 1 : 0.98 }}
           >
