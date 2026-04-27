@@ -103,35 +103,61 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
   };
 
   const handleSuggestionSelect = (address: string) => {
+    // CRITICAL: Capture fresh values BEFORE setting state
+    // This fixes the double-tap bug where stale closure values were used
+    let newPickup = pickup;
+    let newDestination = destination;
+    let newStops = [...stops];
+
     if (activeField === 'pickup') {
+      newPickup = address;
       setPickup(address);
     } else if (activeField === 'destination') {
+      newDestination = address;
       setDestination(address);
     } else if (typeof activeField === 'number') {
-      const newStops = [...stops];
       newStops[activeField] = address;
       setStops(newStops);
     }
 
     setSearchQuery('');
 
+    // Use FRESH values to check completion (not stale state)
+    const checkFieldsFilled = (): boolean => {
+      const hasPickup = newPickup && newPickup.trim() !== '';
+      const hasDestination = newDestination && newDestination.trim() !== '';
+      const allStopsFilled = newStops.length === 0 || newStops.every(stop => stop && stop.trim() !== '');
+      return hasPickup && hasDestination && allStopsFilled;
+    };
+
+    const findNextEmptyField = (): 'pickup' | 'destination' | number | null => {
+      if (!newPickup) return 'pickup';
+      if (!newDestination) return 'destination';
+      for (let i = 0; i < newStops.length; i++) {
+        if (!newStops[i] || newStops[i].trim() === '') {
+          return i;
+        }
+      }
+      return null;
+    };
+
     // Auto-navigate to next empty field or complete the route
     setTimeout(() => {
-      const nextField = getNextEmptyField();
+      const nextField = findNextEmptyField();
 
       if (nextField !== null) {
         // Move to next empty field
         setActiveField(nextField);
         if (nextField === 'pickup') {
-          setSearchQuery(pickup);
+          setSearchQuery(newPickup);
         } else if (nextField === 'destination') {
-          setSearchQuery(destination);
+          setSearchQuery(newDestination);
         } else {
-          setSearchQuery(stops[nextField] || '');
+          setSearchQuery(newStops[nextField] || '');
         }
-      } else if (areAllFieldsFilled() && serviceType === 'ride') {
+      } else if (checkFieldsFilled() && serviceType === 'ride') {
         // Only auto-navigate for ride service type
-        onRouteComplete?.(pickup, destination, stops);
+        onRouteComplete?.(newPickup, newDestination, newStops);
         navigate('/select-ride');
       }
     }, 100);
@@ -329,8 +355,8 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
                 placeholder={locationLoading ? 'Getting your location...' : getPlaceholder('pickup')}
                 className={`w-full bg-gray-100 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-500 focus:outline-none transition-all ${
                   isFieldActive('pickup') 
-                    ? 'ring-2 ring-green-500 bg-white shadow-lg shadow-green-500/20 border-2 border-green-500' 
-                    : 'focus:ring-2 focus:ring-green-500 focus:bg-white'
+                    ? 'ring-2 ring-[#5B2EFF] bg-white shadow-lg shadow-[#5B2EFF]/20 border-2 border-[#5B2EFF]' 
+                    : 'focus:ring-2 focus:ring-[#5B2EFF] focus:bg-white'
                 }`}
                 disabled={locationLoading}
               />
@@ -366,7 +392,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
+                <div className="w-3 h-3 bg-[#5B2EFF] rounded-full flex-shrink-0"></div>
                 <div className="flex-1 relative">
                   <input
                     type="text"
@@ -376,8 +402,8 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
                     placeholder={getPlaceholder(index)}
                     className={`w-full bg-gray-100 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-500 focus:outline-none transition-all ${
                       isFieldActive(index) 
-                        ? 'ring-2 ring-green-500 bg-white shadow-lg shadow-green-500/20 border-2 border-green-500' 
-                        : 'focus:ring-2 focus:ring-green-500 focus:bg-white'
+                        ? 'ring-2 ring-[#5B2EFF] bg-white shadow-lg shadow-[#5B2EFF]/20 border-2 border-[#5B2EFF]' 
+                        : 'focus:ring-2 focus:ring-[#5B2EFF] focus:bg-white'
                     }`}
                   />
                 </div>
@@ -403,8 +429,8 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
                 placeholder={getPlaceholder('destination')}
                 className={`w-full bg-gray-100 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-500 focus:outline-none transition-all ${
                   isFieldActive('destination')
-                    ? 'ring-2 ring-green-500 bg-white shadow-lg shadow-green-500/20 border-2 border-green-500'
-                    : 'focus:ring-2 focus:ring-green-500 focus:bg-white'
+                    ? 'ring-2 ring-[#5B2EFF] bg-white shadow-lg shadow-[#5B2EFF]/20 border-2 border-[#5B2EFF]'
+                    : 'focus:ring-2 focus:ring-[#5B2EFF] focus:bg-white'
                 }`}
               />
               <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
@@ -481,7 +507,7 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
               className={`w-full py-4 px-6 rounded-2xl font-bold text-lg transition-all ${
                 !isLogisticsButtonEnabled()
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg hover:shadow-xl'
+                  : 'bg-[#5B2EFF] text-white shadow-lg hover:shadow-xl hover:bg-[#4A25D9]'
               }`}
               whileTap={!isLogisticsButtonEnabled() ? {} : { scale: 0.98 }}
               whileHover={!isLogisticsButtonEnabled() ? {} : { y: -2 }}
